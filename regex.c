@@ -1,3 +1,5 @@
+#define ARENA_IMPL
+#include "arena.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -186,7 +188,6 @@ struct regex_token;
 union regex_val {
 	char byte;
 	char *str;
-	struct regex_token *concat;
 	struct regex_token *group;
 };
 
@@ -195,7 +196,59 @@ struct regex_token {
 	int mul;
 	union regex_val val;
 	size_t val_len;
+	struct regex_token *next;
 };
+
+struct regex_token *__regex_eval(const char *ex, const char *ex_end, int type, struct arena *a) {
+	puts("todo!");
+	abort();
+}
+
+struct regex_token *regex_eval(const char *ex, const char *ex_end, struct arena *a) {
+	struct regex_token *head = new(a, 1, struct regex_token, 0);
+	*head = (struct regex_token) {
+		.type = REGEX_CONCAT,
+		.mul = REGEX_ONCE,
+		.val = (union regex_val) { 0 },
+		.val_len = 0,
+		.next = NULL,
+	};
+
+	struct regex_token *t = head;
+
+	const char *e;
+	for (e = ex; e < ex_end; e++) {
+		switch (*e) {
+		case '(': {
+			const char *g = e + 1;
+			const char *ge = strchr(g, ')');
+
+			t->next = __regex_eval(g, ge, REGEX_GROUP_ALL, a);
+			t = t->next;
+
+			e = ge;
+		} break;
+
+		case '[': {
+			const char *g = e + 1;
+			const char *ge = strchr(g, ']');
+
+			t->next = __regex_eval(g, ge, REGEX_GROUP_ANY, a);
+			t = t->next;
+
+			e = ge;
+		} break;
+
+		default: {
+			t->next = __regex_eval(e, ex_end, 0, a);
+			t = t->next;
+		} break;
+
+		}
+	}
+
+	return head;
+}
 
 void usage(void) {
 	fputs("usage: ./regex <str> <regex>\n", stderr);
@@ -205,6 +258,8 @@ void usage(void) {
 int main(int argc, char **argv) {
 	if (argc != 3)
 		usage();
+	
+	struct arena a = arena_init(1024);
 	
 	const char *ex = argv[2];
 	const size_t exlen = strlen(ex);
@@ -216,6 +271,8 @@ int main(int argc, char **argv) {
 
 	regex_log(ex, ex + exlen);
 	putchar('\n');
+
+	regex_eval(ex, ex + exlen, &a);
 	
 	puts("false");
 }
