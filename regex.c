@@ -15,7 +15,21 @@ int numeric(const char c) {
 	return '0' <= c && c <= '9';
 }
 
-int regex_valid(const char *ex, const char *ex_end) {
+enum {
+	REGEX_GROUP_ALL = 001, // ()
+	REGEX_GROUP_ANY = 002, // []
+	REGEX_MATCH_ANY = 004, // '.'
+	REGEX_BYTE = 006, // character
+	REGEX_STR = 010, // string of characters
+	REGEX_OR = 020, // '|'
+	REGEX_CONCAT = 040, // concat of multiple types
+
+	REGEX_ONCE = 000, // default multiplier
+	REGEX_ZERO_MORE = 001, // '*'
+	REGEX_ONCE_MORE = 002, // '+'
+};
+
+int regex_valid(const char *ex, const char *ex_end, int type) {
 	const char *e;
 	for (e = ex; e < ex_end; e++) {
 		switch (*e) {
@@ -24,7 +38,7 @@ int regex_valid(const char *ex, const char *ex_end) {
 			if (!end || end >= ex_end)
 				return 0;
 
-			if (!regex_valid(e + 1, end))
+			if (!regex_valid(e + 1, end, REGEX_GROUP_ALL))
 				return 0;
 
 			e = end;
@@ -35,7 +49,7 @@ int regex_valid(const char *ex, const char *ex_end) {
 			if (!end || end >= ex_end)
 				return 0;
 
-			if (!regex_valid(e + 1, end))
+			if (!regex_valid(e + 1, end, REGEX_GROUP_ANY))
 				return 0;
 
 			e = end;
@@ -50,11 +64,15 @@ int regex_valid(const char *ex, const char *ex_end) {
 
 		case '+':
 		case '*': {
+			/* not allowed in [ ] group */
+			if (type == REGEX_GROUP_ANY)
+				return 0;
+
 			/* binds to nothing if at beginning */
 			if (e == ex)
 				return 0;
 
-			/* cant bind to another specifier */
+			/* cant bind to another multiplier */
 			if ((e[-1] == '+' || e[-1] == '*')
 					&& ((ex + 2 > e) || e[-2] != '\\'))
 				return 0;
@@ -145,6 +163,40 @@ void regex_log(const char *ex, const char *ex_end) {
 	}
 }
 
+/*
+	TODO figure this shit out
+	im thinking of having all tokens as linked lists
+	i.e
+		(eee+|lake)+abe =>
+		(node(group_all, ONCE_MORE)->
+			(node(concat)->
+				node(str(ee))->
+				node(byte(e, ONCE_MORE))
+			)->
+			node(str(lake))->
+			NULL
+		)->
+		node(str(abe))->
+		NULL
+	this makes sense right????
+*/
+
+struct regex_token;
+
+union regex_val {
+	char byte;
+	char *str;
+	struct regex_token *concat;
+	struct regex_token *group;
+};
+
+struct regex_token {
+	int type;
+	int mul;
+	union regex_val val;
+	size_t val_len;
+};
+
 void usage(void) {
 	fputs("usage: ./regex <str> <regex>\n", stderr);
 	exit(1);
@@ -157,7 +209,7 @@ int main(int argc, char **argv) {
 	const char *ex = argv[2];
 	const size_t exlen = strlen(ex);
 
-	if (!regex_valid(ex, ex + exlen)) {
+	if (!regex_valid(ex, ex + exlen, 0)) {
 		err("invalid regex");
 		usage();
 	}
