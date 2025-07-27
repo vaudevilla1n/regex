@@ -23,6 +23,7 @@ enum {
 	REGEX_MATCH_ANY = 004, // '.'
 	REGEX_BYTE = 006, // character
 	REGEX_OR = 010, // '|'
+	REGEX_RANGE = 011, // x-y
 
 	REGEX_ONCE = 000, // default multiplier
 	REGEX_ZERO_MORE = 001, // '*'
@@ -59,7 +60,7 @@ int regex_valid(const char *ex, const char *ex_end, int type) {
 			/* binds to nothing if at end */
 			if (e + 1 == ex_end)
 				return 0;
-			ex++;
+			e++;
 		} break;
 
 		case '+':
@@ -106,63 +107,6 @@ int regex_valid(const char *ex, const char *ex_end, int type) {
 	return 1;
 }
 
-void regex_log(const char *ex, const char *ex_end) {
-	const char *e;
-	for (e = ex; e < ex_end; e++) {
-		switch (*e) {
-		case '(': {
-			const char *g = e + 1;
-			const char *ge = strchr(g, ')');
-
-			puts("match all in group (");
-			regex_log(g, ge);
-			puts(")");
-
-			e = ge;
-		} continue;
-
-		case '[': {
-			const char *g = e + 1;
-			const char *ge = strchr(g, ']');
-
-			puts("match all in group [");
-			regex_log(g, ge);
-			puts("]");
-
-			e = ge;
-		} break;
-
-		case '+': {
-			puts("once or more");
-		} break;
-
-		case '*': {
-			puts("zero or more");
-		} break;
-
-		case '.': {
-			puts("match any character"); 
-		} break;
-
-		case '|': {
-			puts("OR");
-		} break;
-
-		case '-': {
-			puts("TO");
-		} break;
-
-		case '\\':
-			e++;
-			[[fallthrough]];
-		default:
-			printf("match char %c\n", *e);
-			break;
-		}
-
-	}
-}
-
 /*
 	TODO figure this shit out
 	im thinking of having all tokens as linked lists
@@ -181,18 +125,21 @@ void regex_log(const char *ex, const char *ex_end) {
 	this makes sense right????
 */
 
-struct regex_token;
+struct regex_range {
+	char start;
+	char end;
+};
 
 union regex_val {
 	char byte;
 	struct regex_token *concat;
+	struct regex_range range;
 };
 
 struct regex_token {
-	int type;
-	int mul;
+	uint8_t type;
+	uint8_t mul;
 	union regex_val val;
-	size_t val_len;
 	struct regex_token *next;
 };
 
@@ -210,7 +157,6 @@ struct regex_token *regex_parse(const char *ex, const char *ex_end, struct arena
 		case '(': {
 			const char *end = strchr(e, ')');
 
-			t->type = REGEX_CONCAT;
 			t = regex_parse(e + 1, end, a);
 
 			e = end;
@@ -235,40 +181,36 @@ struct regex_token *regex_parse(const char *ex, const char *ex_end, struct arena
 			t->type = REGEX_MATCH_ANY;
 		} break;
 
-		case '-': {
-			char l = e[-1];
-			char r = e[1];
+			  /*
+			     TODO stop being a dumbass
 
-			/* no-op */
-			if (l == r)
-				continue;
-
-			if (l > r) {
-				char tmp = l;
-				l = r;
-				r = tmp;
-			}
-
-			/* consumes char to the right of -*/
-			for (char c = l + 1; c <= r; c++) {
-				t = new(a, 1, struct regex_token, 0);
-				t->type = REGEX_BYTE;
-				t->val.byte = c;
-
-				tail->next = t;
-				tail = tail->next;
-			}
-
-			e++;
-		} break;
+			     create a REGEX_RANGE type so that u dont waste memory
+			     expanding this
+			   */
 
 		case '\\':
 			e++;
 			[[fallthrough]];
 		default: {
 			t = new(a, 1, struct regex_token, 0);
-			t->type = REGEX_BYTE;
-			t->val.byte = *e;
+			if (e[1] == '-') {
+				char l = e[0];
+				char r = e[2];
+				if (l > r) {
+					const char tmp = l;
+					l = r;
+					r = tmp;
+				}
+
+				t->type = REGEX_RANGE;
+				t->val.range.start = l;
+				t->val.range.end = r;
+
+				e += 2;
+			} else {
+				t->type = REGEX_BYTE;
+				t->val.byte = *e;
+			}
 		} break;
 		}
 
@@ -296,30 +238,49 @@ struct regex_token *regex_parse(const char *ex, const char *ex_end, struct arena
 	return head;
 }
 
-void regex_token_log(const struct regex_token *t) {
+void regex_log(const struct regex_token *t) {
 	while (t) {
 		switch (t->type) {
 		case REGEX_BYTE: {
-			printf("REGEX BYTE (%c)\n", t->val.byte);
+			printf("'%c'", t->val.byte);
+		} break;
+
+		case REGEX_RANGE: {
+			printf("range(%c -> %c)", t->val.range.start, t->val.range.end);
 		} break;
 
 		case REGEX_CONCAT: {
-			puts("REGEX CONCAT");
-			regex_token_log(t->val.concat);
+			puts("concat (match all) {");
+			regex_log(t->val.concat);
+			putchar('}');
 		} break;
 
-		case REGEX_CONCAT_OR:
-			puts("REGEX CONCAT OR");
-			regex_token_log(t->val.concat);
-			break;
+		case REGEX_CONCAT_OR: {
+			puts("concat (match any) {");
+			regex_log(t->val.concat);
+			putchar('}');
+		} break;
 
 		case REGEX_OR:
-			puts("REGEX OR");
+			puts("or");
 			break;
 
 		case REGEX_MATCH_ANY:
-			puts("REGEX MATCH ANY");
+			printf("match any");
 			break;
+		}
+
+		switch (t->mul) {
+		case REGEX_ONCE_MORE:
+			puts(" once or more");
+			break;
+
+		case REGEX_ZERO_MORE:
+			puts(" zero or more");
+			break;
+
+		default:
+			putchar('\n');
 		}
 
 		t = t->next;
@@ -335,7 +296,7 @@ int main(int argc, char **argv) {
 	if (argc != 3)
 		usage();
 	
-	struct arena a = arena_init(1024);
+	struct arena a = arena_init(4096);
 	
 	const char *ex = argv[2];
 	const size_t exlen = strlen(ex);
@@ -345,11 +306,10 @@ int main(int argc, char **argv) {
 		usage();
 	}
 
-	regex_log(ex, ex + exlen);
-	putchar('\n');
-
 	struct regex_token *regex = regex_parse(ex, ex + exlen, &a);
-	regex_token_log(regex);
+	regex_log(regex);
 	
+	printf("\n%ld bytes used\n", a.head - a.init);
+
 	puts("false");
 }
