@@ -199,8 +199,8 @@ struct regex_token {
 	struct regex_token *next;
 };
 
-struct regex_token *__regex_eval(const char *ex, const char *ex_end, int type, struct arena *a) {
-	puts("todo!");
+struct regex_token *__regex_eval(const char *ex, const char *ex_end, struct arena *a) {
+	puts("todo! (__regex_val)");
 	abort();
 }
 
@@ -218,13 +218,16 @@ struct regex_token *regex_eval(const char *ex, const char *ex_end, struct arena 
 
 	const char *e;
 	for (e = ex; e < ex_end; e++) {
+		struct regex_token *n = NULL;
+
 		switch (*e) {
 		case '(': {
 			const char *g = e + 1;
 			const char *ge = strchr(g, ')');
 
-			t->next = __regex_eval(g, ge, REGEX_GROUP_ALL, a);
-			t = t->next;
+			n = new(a, 1, struct regex_token, 0);
+			n->type = REGEX_GROUP_ALL;
+			n->val.group = __regex_eval(g, ge, a);
 
 			e = ge;
 		} break;
@@ -233,16 +236,27 @@ struct regex_token *regex_eval(const char *ex, const char *ex_end, struct arena 
 			const char *g = e + 1;
 			const char *ge = strchr(g, ']');
 
-			t->next = __regex_eval(g, ge, REGEX_GROUP_ANY, a);
-			t = t->next;
+			n = new(a, 1, struct regex_token, 0);
+			n->type = REGEX_GROUP_ANY;
+			n->val.group = __regex_eval(g, ge, a);
 
 			e = ge;
 		} break;
 
 		default: {
-			t->next = __regex_eval(e, ex_end, 0, a);
-			t = t->next;
+			n = __regex_eval(e, ex_end, a);
 		} break;
+
+		if (e[1] == '+') {
+			n->mul = REGEX_ONCE_MORE;
+			e++;
+		} else if (e[1] == '*') {
+			n->mul = REGEX_ZERO_MORE;
+			e++;
+		}
+
+		t->next = n;
+		t = t->next;
 
 		}
 	}
