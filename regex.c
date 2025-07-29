@@ -30,83 +30,6 @@ enum {
 	REGEX_ONCE_MORE = 002, // '+'
 };
 
-int regex_valid(const char *ex, const char *ex_end, int type) {
-	const char *e;
-	for (e = ex; e < ex_end; e++) {
-		switch (*e) {
-		case '(': {
-			const char *end = strchr(e, ')');
-			if (!end || end >= ex_end)
-				return 0;
-
-			if (!regex_valid(e + 1, end, REGEX_CONCAT))
-				return 0;
-
-			e = end;
-		} break;
-
-		case '[': {
-			const char *end = strchr(e, ']');
-			if (!end || end >= ex_end)
-				return 0;
-
-			if (!regex_valid(e + 1, end, REGEX_CONCAT_OR))
-				return 0;
-
-			e = end;
-		} break;
-
-		case '\\': {
-			/* binds to nothing if at end */
-			if (e + 1 == ex_end)
-				return 0;
-			e++;
-		} break;
-
-		case '+':
-		case '*': {
-			/* not allowed in [ ] group */
-			if (type == REGEX_CONCAT_OR)
-				return 0;
-
-			/* binds to nothing if at beginning */
-			if (e == ex)
-				return 0;
-
-			/* cant bind to another multiplier */
-			if ((e[-1] == '+' || e[-1] == '*')
-					&& ((ex + 2 > e) || e[-2] != '\\'))
-				return 0;
-		} break;
-	
-		case '-': {
-			/* binds to nothing if at beginning or end */
-			if (e == ex || e + 1 == ex_end)
-				return 0;
-
-			/* must be between either two letters or numbers */
-			const char f = e[-1];
-			const char l = e[1];
-			if (alpha(f) && alpha(l))
-				break;
-			else if (numeric(f) && numeric(l))
-				break;
-			else
-				return 0;
-		} break;
-
-		case '|': {
-			/* binds to nothing if at beginning or end */
-			if (e == ex || e + 1 == ex_end)
-				return 0;
-		} break;
-
-		}
-	}
-
-	return 1;
-}
-
 /*
 	TODO figure this shit out
 	im thinking of having all tokens as linked lists
@@ -143,32 +66,110 @@ struct regex_token {
 	struct regex_token *next;
 };
 
-struct regex_token *regex_parse(const char *ex, const char *ex_end, struct arena *a) {
+
+int regex_valid(const char *beg, const char *end, int type) {
+	const char *e;
+	for (e = beg; e < end; e++) {
+		switch (*e) {
+		case '(': {
+			const char *l = strchr(e, ')');
+			if (!l || l >= end)
+				return 0;
+
+			if (!regex_valid(e + 1, l, REGEX_CONCAT))
+				return 0;
+
+			e = l;
+		} break;
+
+		case '[': {
+			const char *l = strchr(e, ']');
+			if (!l || l >= end)
+				return 0;
+
+			if (!regex_valid(e + 1, l, REGEX_CONCAT_OR))
+				return 0;
+
+			e = l;
+		} break;
+
+		case '\\': {
+			/* binds to nothing if at l */
+			if (e + 1 == end)
+				return 0;
+			e++;
+		} break;
+
+		case '+':
+		case '*': {
+			/* not allowed in [ ] group */
+			if (type == REGEX_CONCAT_OR)
+				return 0;
+
+			/* binds to nothing if at beginning */
+			if (e == beg)
+				return 0;
+
+			/* cant bind to another multiplier */
+			if ((e[-1] == '+' || e[-1] == '*')
+					&& ((beg + 2 > e) || e[-2] != '\\'))
+				return 0;
+		} break;
+	
+		case '-': {
+			/* binds to nothing if at beginning or l */
+			if (e == beg || e + 1 == end)
+				return 0;
+
+			/* must be between either two letters or numbers */
+			const char f = e[-1];
+			const char l = e[1];
+			if (alpha(f) && alpha(l))
+				break;
+			else if (numeric(f) && numeric(l))
+				break;
+			else
+				return 0;
+		} break;
+
+		case '|': {
+			/* binds to nothing if at beginning or l */
+			if (e == beg || e + 1 == end)
+				return 0;
+		} break;
+
+		}
+	}
+
+	return 1;
+}
+
+struct regex_token *regex_parse(const char *beg, const char *end, struct arena *a) {
 	struct regex_token *head = new(a, 1, struct regex_token, 0);
 	head->type = REGEX_CONCAT;
 
 	struct regex_token *tail = head->val.concat;
 
 	const char *e;
-	for (e = ex; e < ex_end; e++) {
+	for (e = beg; e < end; e++) {
 		struct regex_token *t;
 
 		switch (*e) {
 		case '(': {
-			const char *end = strchr(e, ')');
+			const char *l = strchr(e, ')');
 
-			t = regex_parse(e + 1, end, a);
+			t = regex_parse(e + 1, l, a);
 
-			e = end;
+			e = l;
 		} break;
 
 		case '[': {
-			const char *end = strchr(e, ']');
+			const char *l = strchr(e, ']');
 
-			t = regex_parse(e + 1, end, a);
+			t = regex_parse(e + 1, l, a);
 			t->type = REGEX_CONCAT_OR;
 
-			e = end;
+			e = l;
 		} break;
 
 		case '|': {
@@ -287,6 +288,84 @@ void regex_log(const struct regex_token *t) {
 	}
 }
 
+const char *regex_match_token(const struct regex_token *regex, const char *beg, const char *end) {
+	switch (regex->type) {
+	case REGEX_CONCAT: {
+		const struct regex_token *t;
+		const char *e = beg;
+		for (t = regex->val.concat; t; t = t->next) {
+			const char *n = regex_match_token(t, e, end);
+
+			if (t->next && t->next->type == REGEX_OR) {
+				t = t->next;
+				continue;
+			} else if (!n) {
+				return NULL;
+			}
+
+			e = n;	
+		}
+
+		return e;
+	};
+
+	case REGEX_CONCAT_OR: {
+		fputs("TODO! regex_match_token\n", stderr);
+		abort();
+	};
+
+	case REGEX_MATCH_ANY: {
+		if (regex->next) {
+			const char *e;
+			for (e = beg; e < end && !regex_match_token(regex->next, e, end); e++)
+				;
+			return e;
+		}
+		return end;
+	};
+
+	case REGEX_BYTE: {
+		switch (regex->mul) {
+		case REGEX_ZERO_MORE: {
+			while (*beg == regex->val.byte)
+				beg++;
+			return beg;
+		};
+		case REGEX_ONCE_MORE: {
+			const char *e = beg;
+			while (*e == regex->val.byte)
+				e++;
+			return (e == beg) ? NULL : e;
+		};
+		default:
+			return (*beg == regex->val.byte) ? beg + 1 : NULL;
+		}
+	};
+
+	case REGEX_RANGE: {
+		switch (regex->mul) {
+		case REGEX_ZERO_MORE: {
+			while (regex->val.range.start <= *beg && *beg <= regex->val.range.end)
+				beg++;
+			return beg;
+		};
+		case REGEX_ONCE_MORE: {
+			const char *e = beg;
+			while (regex->val.range.start <= *beg && *beg <= regex->val.range.end)
+				e++;
+			return (e == beg) ? NULL : e;
+		};
+		default:
+			return (regex->val.range.start <= *beg && *beg <= regex->val.range.end) ? beg + 1 : NULL;
+		}
+	} break;
+
+	default:
+		fputs("regex_match_token: UNREACHABLE\n", stderr);
+		abort();
+	}
+}
+
 void usage(void) {
 	fputs("usage: ./regex <str> <regex>\n", stderr);
 	exit(1);
@@ -308,8 +387,8 @@ int main(int argc, char **argv) {
 
 	struct regex_token *regex = regex_parse(ex, ex + exlen, &a);
 	regex_log(regex);
-	
-	printf("\n%ld bytes used\n", a.head - a.init);
 
-	puts("false");
+	puts((regex_match_token(regex, ex, ex + exlen)) ? "true" : "false");
+
+	printf("\n%ld bytes used\n", a.head - a.init);
 }
