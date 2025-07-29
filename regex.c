@@ -290,18 +290,33 @@ void regex_log(const struct regex_token *t) {
 
 const char *regex_match_token(const struct regex_token *regex, const char *beg, const char *end);
 
+/*
+	ISSUE!
+	must end on REGEX_OR
+	bad check at end of regex_match_token
+		if (ret == end && regex->next)
+*/
+
 static inline const char *regex_match_concat(const struct regex_token *t, const char *beg, const char *end) {
 	const char *e = beg;
-	for (t = t->val.concat; e < end && t; t = t->next) {
+	for (t = t->val.concat; t; t = t->next) {
 		const char *n = regex_match_token(t, e, end);
 
 		if (!n) {
-			if (t->next && t->next->type == REGEX_OR) {
-				t = t->next;
+			/* check for REGEX_OR ('|') to see if we can continue if nothing has been matched yet */
+			const struct regex_token *tor = t->next;
+			for (; tor; tor = tor->next)
+				if (tor->type == REGEX_OR)
+					break;
+			if (tor) {
+				t = tor;
 				continue;
 			} else  {
 				return NULL;
 			}
+		} else if (t->next && t->next->type == REGEX_OR) {
+			/* one expression in OR matched, so just return */
+			return n;
 		}
 
 		e = n;	
@@ -331,7 +346,7 @@ const char *regex_match_token(const struct regex_token *regex, const char *beg, 
 				beg = e;
 
 			return beg;
-		}
+		} break;
 		case REGEX_ONCE_MORE: {
 			const char *e = beg;
 			const char *n = beg;
@@ -339,14 +354,13 @@ const char *regex_match_token(const struct regex_token *regex, const char *beg, 
 				e = n;
 
 			return (e == beg) ? NULL : e;
-		}
+		} break;
 		default: {
 			return regex_match_concat(regex, beg, end);
+		} break;
 		}
-		}
-	};
+	} break;
 
-	/* gotta do this too */
 	case REGEX_CONCAT_OR: {
 		switch (regex->mul) {
 		case REGEX_ZERO_MORE: {
@@ -355,7 +369,7 @@ const char *regex_match_token(const struct regex_token *regex, const char *beg, 
 				beg = e;
 
 			return beg;
-		}
+		} break;
 		case REGEX_ONCE_MORE: {
 			const char *e = beg;
 			const char *n = beg;
@@ -363,12 +377,12 @@ const char *regex_match_token(const struct regex_token *regex, const char *beg, 
 				e = n;
 
 			return (e == beg) ? NULL : e;
-		}
+		} break;
 		default: {
 			return regex_match_concat_or(regex, beg, end);
 		}
 		}
-	};
+	} break;
 
 	/*
 		TODO
@@ -405,7 +419,7 @@ const char *regex_match_token(const struct regex_token *regex, const char *beg, 
 			return NULL;
 		}
 		return end;
-	};
+	} break;
 
 	case REGEX_BYTE: {
 		switch (regex->mul) {
@@ -413,17 +427,18 @@ const char *regex_match_token(const struct regex_token *regex, const char *beg, 
 			while (beg < end && *beg == regex->val.byte)
 				beg++;
 			return beg;
-		};
+		} break;
 		case REGEX_ONCE_MORE: {
 			const char *e = beg;
 			while (e < end && *e == regex->val.byte)
 				e++;
 			return (e == beg) ? NULL : e;
-		};
-		default:
-			return (*beg == regex->val.byte) ? beg + 1 : NULL;
+		} break;
+		default: {
+			return (beg < end && *beg == regex->val.byte) ? beg + 1 : NULL;
 		}
-	};
+		}
+	} break;
 
 	case REGEX_RANGE: {
 		switch (regex->mul) {
@@ -431,13 +446,13 @@ const char *regex_match_token(const struct regex_token *regex, const char *beg, 
 			while (beg < end && regex->val.range.start <= *beg && *beg <= regex->val.range.end)
 				beg++;
 			return beg;
-		};
+		} break;
 		case REGEX_ONCE_MORE: {
 			const char *e = beg;
 			while (e < end && regex->val.range.start <= *e && *e <= regex->val.range.end)
 				e++;
 			return (e == beg) ? NULL : e;
-		};
+		} break;
 		default:
 			return (regex->val.range.start <= *beg && *beg <= regex->val.range.end) ? beg + 1 : NULL;
 		}
