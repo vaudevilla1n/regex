@@ -67,7 +67,6 @@ struct regex_token {
 	struct regex_token *next;
 };
 
-
 int regex_valid(const char *beg, const char *end, int type) {
 	const char *e;
 	for (e = beg; e < end; e++) {
