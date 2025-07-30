@@ -1,5 +1,6 @@
 #define ARENA_IMPL
 #include "arena.h"
+#include <assert.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -29,6 +30,8 @@ enum {
 	REGEX_ZERO_MORE = 001, // '*'
 	REGEX_ONCE_MORE = 002, // '+'
 	REGEX_ZERO_ONCE = 004, // '?'
+
+	REGEX_INTERNAL_SUCCESS = 001,
 };
 
 /*
@@ -297,23 +300,37 @@ void regex_log(const struct regex_token *t) {
 	}
 }
 
-const char *regex_match_token(const struct regex_token *regex, const char *beg, const char *end);
+const char *regex_match_token(struct regex_token *regex, const char *beg, const char *end);
 
 /*
 	ISSUE!
 	must end on REGEX_OR
 	bad check at end of regex_match_token
 		if (ret == end && regex->next)
+	
+	RESOLVED!
 */
 
-static inline const char *regex_match_concat(const struct regex_token *t, const char *beg, const char *end) {
+static inline const char *regex_match_byte(struct regex_token *t, const char *beg, const char *end) {
+	return (beg < end && *beg == t->val.byte) ? beg + 1 : NULL;
+}
+
+static inline const char *regex_match_any(struct regex_token *t, const char *beg, const char *end) {
+	return (beg < end) ? beg + 1 : NULL;
+}
+
+static inline const char *regex_match_range(struct regex_token *t, const char *beg, const char *end) {
+	return (beg < end && t->val.range.start <= *beg && *beg <= t->val.range.end) ? beg + 1 : NULL;
+}
+
+static inline const char *regex_match_concat(struct regex_token *t, const char *beg, const char *end) {
 	const char *e = beg;
 	for (t = t->val.concat; t; t = t->next) {
 		const char *n = regex_match_token(t, e, end);
 
 		if (!n) {
 			/* check for REGEX_OR ('|') to see if we can continue if nothing has been matched yet */
-			const struct regex_token *tor = t->next;
+			struct regex_token *tor = t->next;
 			for (; tor; tor = tor->next)
 				if (tor->type == REGEX_OR)
 					break;
@@ -324,7 +341,7 @@ static inline const char *regex_match_concat(const struct regex_token *t, const 
 				return NULL;
 			}
 		} else if (t->next && t->next->type == REGEX_OR) {
-			/* one expression in OR matched, so just return */
+			/* one expression that is binded to a REGEX_OR matched, so just return */
 			return n;
 		}
 
@@ -334,7 +351,7 @@ static inline const char *regex_match_concat(const struct regex_token *t, const 
 	return e;
 }
 
-static inline const char *regex_match_concat_or(const struct regex_token *t, const char *beg, const char *end) {
+static inline const char *regex_match_concat_or(struct regex_token *t, const char *beg, const char *end) {
 	for (t = t->val.concat; t; t = t->next) {
 		const char *e = regex_match_token(t, beg, end);
 
@@ -345,147 +362,106 @@ static inline const char *regex_match_concat_or(const struct regex_token *t, con
 	return NULL;
 }
 
-const char *regex_match_token(const struct regex_token *regex, const char *beg, const char *end) {
+/* im not typing out this function pointer */
+typedef typeof(regex_match_byte) regex_matcher_func;
+
+const char *regex_match_token(struct regex_token *regex, const char *beg, const char *end) {
+	assert(regex && beg && end && "invalid regex_match_token args");
+
+	regex_matcher_func *matcher = NULL;
+
 	switch (regex->type) {
-	case REGEX_CONCAT: {
-		switch (regex->mul) {
-		case REGEX_ZERO_MORE: {
-			const char *e = beg;
-			while (e < end && (e = regex_match_concat(regex, e, end)))
-				beg = e;
-
-			return beg;
-		} break;
-		case REGEX_ONCE_MORE: {
-			const char *e = beg;
-			const char *n = beg;
-			while (n < end && (n = regex_match_concat(regex, n, end)))
-				e = n;
-
-			return (e == beg) ? NULL : e;
-		} break;
-		case REGEX_ZERO_ONCE: {
-			const char *e = regex_match_concat(regex, beg, end);
-
-			return (e) ? e : beg;
-		} break;
-		default: {
-			return regex_match_concat(regex, beg, end);
-		} break;
-		}
-	} break;
-
-	case REGEX_CONCAT_OR: {
-		switch (regex->mul) {
-		case REGEX_ZERO_MORE: {
-			const char *e = beg;
-			while (e < end && (e = regex_match_concat_or(regex, e, end)))
-				beg = e;
-
-			return beg;
-		} break;
-		case REGEX_ONCE_MORE: {
-			const char *e = beg;
-			const char *n = beg;
-			while (n < end && (n = regex_match_concat_or(regex, n, end)))
-				e = n;
-
-			return (e == beg) ? NULL : e;
-		} break;
-		case REGEX_ZERO_ONCE: {
-			const char *e = regex_match_concat_or(regex, beg, end);
-
-			return (e) ? e : beg;
-		} break;
-		default: {
-			return regex_match_concat_or(regex, beg, end);
-		}
-		}
-	} break;
-
-	/*
-		TODO
-		fix this V
-		.* does not work when there are characters to match after
-		.i.e ./regex "adsaaas" ".*s" returns false because it matches with the first
-		s and terminates
-
-		i just had an idea while writing this
-		maybe make it match on the very last
-
-		^ that idea only works when a single regex instance (char, concat) is left
-
-		i could iterate through and see which point the rest of the expression matches the rest of the text
-		thats slow tho
-		ill do it for now
-
-		yeah it worked
-	*/
-	case REGEX_MATCH_ANY: {
-		if (regex->next) {
-			struct regex_token g = {
-				.type = REGEX_CONCAT,
-				.val = {
-					.concat = regex->next,
-				},
-			};
-			const char *e;
-			for (e = beg; e < end ; e++) {
-				if (regex_match_token(&g, e, end) == end)
-					/* finished with all matching, no need to do it again */
-					return end;
-			}
-			return NULL;
-		}
-		return end;
-	} break;
-
 	case REGEX_BYTE: {
-		switch (regex->mul) {
-		case REGEX_ZERO_MORE: {
-			while (beg < end && *beg == regex->val.byte)
-				beg++;
-			return beg;
-		} break;
-		case REGEX_ONCE_MORE: {
-			const char *e = beg;
-			while (e < end && *e == regex->val.byte)
-				e++;
-			return (e == beg) ? NULL : e;
-		} break;
-		case REGEX_ZERO_ONCE: {
-			return (beg < end && *beg == regex->val.byte) ? beg + 1 : beg;
-		} break;
-		default: {
-			return (beg < end && *beg == regex->val.byte) ? beg + 1 : NULL;
-		}
-		}
+		matcher = regex_match_byte;
+	} break;
+
+	case REGEX_MATCH_ANY: {
+		matcher = regex_match_any;
 	} break;
 
 	case REGEX_RANGE: {
-		switch (regex->mul) {
-		case REGEX_ZERO_MORE: {
-			while (beg < end && regex->val.range.start <= *beg && *beg <= regex->val.range.end)
-				beg++;
-			return beg;
-		} break;
-		case REGEX_ONCE_MORE: {
-			const char *e = beg;
-			while (e < end && regex->val.range.start <= *e && *e <= regex->val.range.end)
-				e++;
-			return (e == beg) ? NULL : e;
-		} break;
-		case REGEX_ZERO_ONCE: {
-			return (regex->val.range.start <= *beg && *beg <= regex->val.range.end) ? beg + 1 : beg;
-		} break;
-		default:
-			return (regex->val.range.start <= *beg && *beg <= regex->val.range.end) ? beg + 1 : NULL;
-		}
+		matcher = regex_match_range;
 	} break;
 
-	default:
-		fputs("regex_match_token: UNREACHABLE\n", stderr);
+	case REGEX_CONCAT: {
+		matcher = regex_match_concat;
+	} break;
+
+	case REGEX_CONCAT_OR: {
+		matcher = regex_match_concat_or;
+	} break;
+	
+	default: {
+		fputs("unknown regex_token type\n", stderr);
 		abort();
+	} break;
+
+	}
+
+	switch (regex->mul) {
+	case REGEX_ZERO_ONCE: {
+		const char *e = matcher(regex, beg, end);
+
+		return (e) ? e : beg;
+	} break;
+
+	case REGEX_ZERO_MORE: {
+		/*
+		   make sure all expressions are evaluated
+
+		   tbh not sure why this helps but it does and i dont feel
+		   like thinking abt it
+		*/
+		struct regex_token g = {
+			.type = REGEX_CONCAT,
+			.val = {
+				.concat = regex->next,
+			},
+		};
+		while (beg < end) {
+			if (regex->next && (regex_match_token(&g, beg, end) == end)) {
+				// nothing more to do if the path was already found
+				regex->next = NULL;
+				return end;
+			}
+			const char *e;
+			if ((e = matcher(regex, beg, end)))
+				beg = e;
+			else
+				break;
+		}
+
+		return beg;
+	} break;
+
+	case REGEX_ONCE_MORE: {
+		const char *e = beg;
+		struct regex_token g = {
+			.type = REGEX_CONCAT,
+			.val = {
+				.concat = regex->next,
+			},
+		};
+		while (e < end) {
+			const char *n = matcher(regex, e, end);
+			if (n)
+				e = n;
+			else
+				break;
+
+			if (regex->next && (regex_match_token(&g, e, end) == end)) {
+				regex->next = NULL;
+				return end;
+			}
+		}
+
+		return (e == beg) ? NULL : e;
+	} break;
+
+	default: {
+		return matcher(regex, beg, end);
+	} break;
+
 	}
 }
 
@@ -512,9 +488,9 @@ int main(int argc, char **argv) {
 	}
 
 	struct regex_token *regex = regex_parse(ex, ex + exlen, &a);
-	//regex_log(regex);
 
-	puts((regex_match_token(regex, s, s + slen) == (s + slen)) ? "true" : "false");
+	const char *ret = regex_match_token(regex, s, s + slen);
+	puts((ret == (s + slen)) ? "true" : "false");
 
 	printf("\n%ld/%ld bytes used\n", a.head - a.init, a.tail - a.init);
 }

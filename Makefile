@@ -8,6 +8,8 @@ test: regex
 	time ./regex "lo" "los"
 	time ./regex "loll" "(lo)*l+"
 	time ./regex "hi" "hi|lo"
+	time ./regex "aaab" "a+b"
+	time ./regex "abasdas" ".+s"
 
 clean:
 	rm -f regex
