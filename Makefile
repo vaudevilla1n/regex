@@ -1,5 +1,5 @@
 CC = cc
-CFLAGS = -Wall -Wextra -Wpedantic -Wno-unused-parameter -g3 -std=gnu23
+CFLAGS = -Wall -Wextra -Wpedantic -Wno-unused-parameter -O3 -std=gnu23
 
 regex: regex.c arena.h
 
