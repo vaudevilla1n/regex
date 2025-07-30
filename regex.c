@@ -30,8 +30,6 @@ enum {
 	REGEX_ZERO_MORE = 001, // '*'
 	REGEX_ONCE_MORE = 002, // '+'
 	REGEX_ZERO_ONCE = 004, // '?'
-
-	REGEX_INTERNAL_SUCCESS = 001,
 };
 
 /*
