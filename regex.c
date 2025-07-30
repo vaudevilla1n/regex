@@ -1,10 +1,13 @@
 #define ARENA_IMPL
 #include "arena.h"
-#include <assert.h>
+#include <errno.h>
 #include <stdio.h>
+#include <assert.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
+
+typedef ptrdiff_t isize_t;
 
 #define err(msg)	fprintf(stderr, "%s\n", msg)
 #define errf(fmt, ...)	fprintf(stderr, fmt "\n", __VA_ARGS__)
@@ -16,6 +19,17 @@ int alpha(const char c) {
 
 int numeric(const char c) {
 	return '0' <= c && c <= '9';
+}
+
+int parse_int(const char *s) {
+	if (!s || !*s)
+		return 0;
+
+	errno = 0;
+	char *end = NULL;
+	const int x = strtoul(s, &end, 0);
+
+	return (*end || errno) ? 0 : x;
 }
 
 enum {
@@ -463,32 +477,97 @@ const char *regex_match_token(struct regex_token *regex, const char *beg, const 
 	}
 }
 
+/* build string with tmp arena, then alloc finished string */
+
+const char *regex_matches_concat(const struct regex *regex, struct arena tmp, struct arena *a) {
+	struct regex_token *t;
+	for (t = regex->val.concat; t; t = t->next) {
+		switch(t->type) {
+		}
+	}
+}
+
+#define MATCH_LIMIT	100
+
+// returns <count> strings that match the regex
+const char **regex_matches(struct regex_token *regex, isize_t count, struct arena *a) {
+	assert(count <= MATCH_LIMIT && "regex_matches: count must be maximum 100");
+
+	const char **matches = new(a, count + 1, const char *, 0);
+
+	switch (regex->mul) {
+	case REGEX_ZERO_MORE: {
+	} break;
+
+	case REGEX_ZERO_ONCE: {
+	} break;
+
+	case REGEX_ONCE_MORE: {
+	} break;
+
+	default: {
+	} break;
+
+	}
+}
+
 void usage(void) {
-	fputs("usage: ./regex <str> <regex>\n", stderr);
+	fputs("usage: ./regex [<str> <regex> (match)]\n"
+			"               [-p <num> <regex> (print <num> matching strings)]\n", stderr);
 	exit(1);
 }
 
+enum {
+	MATCHING = 001,
+	PRINTING = 002,
+};
+
+#define MAX_ALLOC	1024
+
 int main(int argc, char **argv) {
-	if (argc != 3)
-		usage();
-	
-	struct arena a = arena_init(4096);
-	
-	const char *s = argv[1];
-	const size_t slen = strlen(s);
+	int flags = 0;
 
-	const char *ex = argv[2];
-	const size_t exlen = strlen(ex);
-
-	if (!regex_valid(ex, ex + exlen, 0)) {
-		err("invalid regex");
+	if (argc == 4 && !strcmp(argv[1], "-p")) {
+		/* printing */
+		flags |= PRINTING;
+	} else if (argc == 3) {
+		flags |= MATCHING;
+	} else {
 		usage();
 	}
 
-	struct regex_token *regex = regex_parse(ex, ex + exlen, &a);
+	struct arena a = arena_init(MAX_ALLOC);
 
-	const char *ret = regex_match_token(regex, s, s + slen);
-	puts((ret == (s + slen)) ? "true" : "false");
+	/* matching strings */
+	if (flags & MATCHING) {
+		const char *s = argv[1];
+		const size_t slen = strlen(s);
 
-	printf("\n%ld/%ld bytes used\n", a.head - a.init, a.tail - a.init);
+		const char *ex = argv[2];
+		const size_t exlen = strlen(ex);
+
+		if (!regex_valid(ex, ex + exlen, 0)) {
+			err("invalid regex");
+			usage();
+		}
+
+		struct regex_token *regex = regex_parse(ex, ex + exlen, &a);
+
+		const char *ret = regex_match_token(regex, s, s + slen);
+		puts((ret == (s + slen)) ? "true" : "false");
+	} else if (flags & PRINTING) {
+	/* printing strings */
+		const int nstrs = parse_int(argv[2]);
+		if (!nstrs)
+			usage();
+
+		puts("ooga booga");
+	} else {
+		usage();
+	}
+
+	const isize_t used_bytes = a.head - a.init;
+	const isize_t total_bytes = a.tail - a.init;
+	const double percentage = ((double)used_bytes / (double)total_bytes) * 100;
+	printf("\n%ld/%ld bytes used (%.2f%%)\n", used_bytes, total_bytes, percentage);
 }
