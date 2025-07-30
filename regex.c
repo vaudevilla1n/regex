@@ -28,6 +28,7 @@ enum {
 	REGEX_ONCE = 000, // default multiplier
 	REGEX_ZERO_MORE = 001, // '*'
 	REGEX_ONCE_MORE = 002, // '+'
+	REGEX_ZERO_ONCE = 004, // '?'
 };
 
 /*
@@ -100,6 +101,7 @@ int regex_valid(const char *beg, const char *end, int type) {
 			e++;
 		} break;
 
+		case '?':
 		case '+':
 		case '*': {
 			/* not allowed in [ ] group */
@@ -111,7 +113,7 @@ int regex_valid(const char *beg, const char *end, int type) {
 				return 0;
 
 			/* cant bind to another multiplier */
-			if ((e[-1] == '+' || e[-1] == '*')
+			if ((e[-1] == '+' || e[-1] == '*' || e[-1] == '?')
 					&& ((beg + 2 > e) || e[-2] != '\\'))
 				return 0;
 		} break;
@@ -224,6 +226,10 @@ struct regex_token *regex_parse(const char *beg, const char *end, struct arena *
 			t->mul = REGEX_ONCE_MORE;
 			e++;
 			break;
+		case '?':
+			t->mul = REGEX_ZERO_ONCE;
+			e++;
+			break;
 		default:
 			t->mul = REGEX_ONCE;
 			break;
@@ -278,6 +284,10 @@ void regex_log(const struct regex_token *t) {
 
 		case REGEX_ZERO_MORE:
 			puts(" zero or more");
+			break;
+
+		case REGEX_ZERO_ONCE:
+			puts(" zero or once");
 			break;
 
 		default:
@@ -355,6 +365,11 @@ const char *regex_match_token(const struct regex_token *regex, const char *beg, 
 
 			return (e == beg) ? NULL : e;
 		} break;
+		case REGEX_ZERO_ONCE: {
+			const char *e = regex_match_concat(regex, beg, end);
+
+			return (e) ? e : beg;
+		} break;
 		default: {
 			return regex_match_concat(regex, beg, end);
 		} break;
@@ -377,6 +392,11 @@ const char *regex_match_token(const struct regex_token *regex, const char *beg, 
 				e = n;
 
 			return (e == beg) ? NULL : e;
+		} break;
+		case REGEX_ZERO_ONCE: {
+			const char *e = regex_match_concat_or(regex, beg, end);
+
+			return (e) ? e : beg;
 		} break;
 		default: {
 			return regex_match_concat_or(regex, beg, end);
@@ -434,6 +454,9 @@ const char *regex_match_token(const struct regex_token *regex, const char *beg, 
 				e++;
 			return (e == beg) ? NULL : e;
 		} break;
+		case REGEX_ZERO_ONCE: {
+			return (beg < end && *beg == regex->val.byte) ? beg + 1 : beg;
+		} break;
 		default: {
 			return (beg < end && *beg == regex->val.byte) ? beg + 1 : NULL;
 		}
@@ -452,6 +475,9 @@ const char *regex_match_token(const struct regex_token *regex, const char *beg, 
 			while (e < end && regex->val.range.start <= *e && *e <= regex->val.range.end)
 				e++;
 			return (e == beg) ? NULL : e;
+		} break;
+		case REGEX_ZERO_ONCE: {
+			return (regex->val.range.start <= *beg && *beg <= regex->val.range.end) ? beg + 1 : beg;
 		} break;
 		default:
 			return (regex->val.range.start <= *beg && *beg <= regex->val.range.end) ? beg + 1 : NULL;
