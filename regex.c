@@ -1,4 +1,3 @@
-#define ARENA_IMPL
 #include "arena.h"
 #include <errno.h>
 #include <stdio.h>
@@ -479,7 +478,8 @@ const char *regex_match_token(struct regex_token *regex, const char *beg, const 
 
 /* build string with tmp arena, then alloc finished string */
 
-const char *regex_matches_concat(const struct regex *regex, struct arena tmp, struct arena *a) {
+/*
+const char *regex_matches_concat(const struct regex_token *regex, struct arena tmp, struct arena *a) {
 	struct regex_token *t;
 	for (t = regex->val.concat; t; t = t->next) {
 		switch(t->type) {
@@ -510,6 +510,7 @@ const char **regex_matches(struct regex_token *regex, isize_t count, struct aren
 
 	}
 }
+*/
 
 void usage(void) {
 	fputs("usage: ./regex [<str> <regex> (match)]\n"
