@@ -28,10 +28,12 @@ typedef ptrdiff_t isize_t;
 	abc[d-l]+.*
 	grammar
 
-	expr		:= expr+ | term
-	group		:= '(' expr ')'
-	or		:= term ('|' term)*
-	term		:= literal quant | literal | bracket
+	expr		:= ('^' | '$') capture (capture)*
+	capture		:= concat | alternation | term
+	concat		:= term (term)*
+	alternaton	:= term ('|' term)*
+	term		:= group | literal quant | literal | bracket
+	group		:= '(' capture ')'
 	bracket		:= '[' (literal | range)+ ']' | '[' '^' (literal | range)+ ']'
 	range		:= literal '-' literal
 	literal		:= any ascii character
