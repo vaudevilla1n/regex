@@ -1,8 +1,8 @@
-CC = cc
-CFLAGS = -Wall -Wextra -Wpedantic -Wno-unused-parameter -O3 -std=gnu23 -DARENA_IMPL
+CFLAGS = -Wall -Wextra -Wpedantic -ggdb -std=gnu23 -DARENA_IMPL
 
 regex: regex.c arena.h
 
+.PHONY: test clean
 test: regex
 	time ./regex "plead" "(dead)*"
 	@echo
@@ -18,4 +18,4 @@ test: regex
 	@echo
 
 clean:
-	rm -f regex
+	rm -f ./regex
