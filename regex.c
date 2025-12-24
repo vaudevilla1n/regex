@@ -1,16 +1,19 @@
 #include "arena.h"
+#include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
 #include <assert.h>
+#include <getopt.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <getopt.h>
+#include <stdbool.h>
 
 typedef ptrdiff_t isize_t;
 
-#define UNUSED(x)	(void)x
-#define TODO(x)		do { fprintf(stderr, "todo: %s\n", #x); abort(); } while (0)
+#define UNUSED(x)		(void)x
+#define TODO(x)			do { fprintf(stderr, "todo: %s\n", #x); abort(); } while (0)
+#define UNREACHABLE(x)		do { fprintf(stderr, "unreachable: %s\n", #x); abort(); } while (0)
 
 #define err(fmt, ...) \
 	do { \
@@ -30,8 +33,8 @@ typedef ptrdiff_t isize_t;
 
 	expr		:= ('^' | '$') capture (capture)*
 	capture		:= concat | alternation | term
-	concat		:= term (term)*
 	alternaton	:= term ('|' term)*
+	concat		:= term (term)*
 	term		:= group | literal quant | literal | bracket
 	group		:= '(' capture ')'
 	bracket		:= '[' (literal | range)+ ']' | '[' '^' (literal | range)+ ']'
@@ -47,20 +50,125 @@ typedef ptrdiff_t isize_t;
 	ast
 */
 
+typedef enum {
+	TERR,
+	TEOF,
+	TOPAREN, TCPAREN,
+	TOBRACK, TCBRACK,
+	TSTAR, TDOT, TPLUS, TQUESTION, TBAR, TDOLLAR, TCARET, TSLASH,
+	TCHAR,
+} token_type_t;
+
+const char *token_type_string(const token_type_t type) {
+	switch (type) {
+	case TERR:	return "TERR";
+	case TEOF:	return "TEOF";
+	case TOPAREN:	return "TOPAREN";
+	case TCPAREN:	return "TCPAREN";
+	case TOBRACK:	return "TOBRACK";
+	case TCBRACK:	return "TCBRACK";
+	case TSTAR:	return "TSTAR";
+	case TDOT:	return "TDOT";
+	case TPLUS:	return "TPLUS";
+	case TQUESTION:	return "TQUESTION";
+	case TBAR:	return "TBAR";
+	case TDOLLAR:	return "TDOLLAR";
+	case TCARET:	return "TCARET";
+	case TSLASH:	return "TSLASH";
+	case TCHAR:	return "TCHAR";
+	default: UNREACHABLE(token_type_string);
+	}
+}
+
+typedef struct {
+	const char *src; 
+	size_t srclen;
+
+	size_t pos;
+
+	token_type_t token;
+	const char *token_text;
+	size_t token_textlen;
+} lexer_t;
+
+lexer_t lexer_new(const char *src, const size_t srclen) {
+	return (lexer_t) {
+		.src = src,
+		.srclen = srclen,
+	};
+}
+
+char lexer_peek_char(lexer_t *l) {
+	return (l->pos < l->srclen) ? l->src[l->pos] : 0;
+}
+
+char lexer_next_char(lexer_t *l) {
+	return (l->pos < l->srclen) ? l->src[l->pos++] : 0;
+}
+
+bool lexer_next(lexer_t *l) {
+	while (isspace(lexer_peek_char(l)))
+		lexer_next_char(l);
+
+	/*
+	TERR,
+	TEOF,
+	TOPAREN, TCPAREN,
+	TOBRACK, TCBRACK,
+	TSTAR, TDOT, TPLUS, TQUESTION, TBAR, TDOLLAR, TCARET, TSLASH
+	TCHAR,
+	*/
+
+	if (!lexer_peek_char(l))
+		return false;
+	
+	l->token_text = l->src + l->pos;
+	l->token_textlen = 1;
+	
+	switch (lexer_next_char(l)) {
+	case '(': l->token = TOPAREN; break;
+	case ')': l->token = TCPAREN; break;
+	case '[': l->token = TOBRACK; break;
+	case ']': l->token = TCBRACK; break;
+	case '*': l->token = TSTAR; break;
+	case '.': l->token = TDOT; break;
+	case '+': l->token = TPLUS; break;
+	case '?': l->token = TQUESTION; break;
+	case '|': l->token = TBAR; break;
+	case '$': l->token = TDOLLAR; break;
+	case '^': l->token = TCARET; break;
+	case '\\': l->token = TSLASH; break;
+	default: l->token = TCHAR; break;
+	}
+
+	return true;
+}
+
+void regex_tokenize(const char *regex) {
+	lexer_t l = lexer_new(regex, strlen(regex));
+
+	while (lexer_next(&l))
+		printf("%s: %.*s\n", token_type_string(l.token), (int)l.token_textlen, l.token_text);
+}
+
 void regex_match(const char *regex, const char *s) {
+	regex_tokenize(regex);
+
 	UNUSED(regex);
 	UNUSED(s);
-	TODO(regex_match);
+	//TODO(regex_match);
 }
 
 void regex_print(const char *regex, const size_t n) {
+	regex_tokenize(regex);
+
 	UNUSED(regex);
 	UNUSED(n);
-	TODO(regex_print);
+	//TODO(regex_print);
 }
 
 void usage(void) {
-	fputs("usage: ./regex [<str> <regex> (match)]\n"
+	fputs("usage: ./regex [<regex> <str> (match)]\n"
 			"               [-p <num> <regex> (print <num> matching strings)]\n", stderr);
 	exit(1);
 }
@@ -85,8 +193,8 @@ int main(int argc, char **argv) {
 		if (argc - optind != 2)
 			usage();
 
-		const char *str = argv[optind];
-		const char *regex = argv[optind + 1];
+		const char *regex = argv[optind];
+		const char *str = argv[optind + 1];
 
 		regex_match(regex, str);
 	} break;

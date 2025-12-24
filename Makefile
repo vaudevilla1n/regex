@@ -4,17 +4,17 @@ regex: regex.c arena.h
 
 .PHONY: test clean
 test: regex
-	time ./regex "plead" "(dead)*"
+	time ./regex "(dead)*" "plead"
 	@echo
-	time ./regex "lo" "los"
+	time ./regex "los" "lo"
 	@echo
-	time ./regex "loll" "(lo)*l+"
+	time ./regex "(lo)*l+" "loll"
 	@echo
-	time ./regex "hi" "hi|lo"
+	time ./regex "hi|lo" "hi"
 	@echo
-	time ./regex "aaab" "a+b"
+	time ./regex "a+b" "aaab"
 	@echo
-	time ./regex "abasdas" ".+s"
+	time ./regex ".+s" "abasdas"
 	@echo
 
 clean:
